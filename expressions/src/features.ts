@@ -46,6 +46,13 @@ export interface ExperimentalFeatures {
    * @default false
    */
   allowConcurrencyQueue?: boolean;
+
+  /**
+   * Enable parsing and validation of the top-level `dependencies` section
+   * for lockfile enforcement.
+   * @default false
+   */
+  allowDependencies?: boolean;
 }
 
 /**
@@ -62,7 +69,8 @@ const allFeatureKeys: ExperimentalFeatureKey[] = [
   "blockScalarChompingWarning",
   "allowCaseFunction",
   "allowCopilotRequestsPermission",
-  "allowConcurrencyQueue"
+  "allowConcurrencyQueue",
+  "allowDependencies"
 ];
 
 export class FeatureFlags {

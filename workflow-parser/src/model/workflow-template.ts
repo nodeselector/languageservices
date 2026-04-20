@@ -12,6 +12,7 @@ export type WorkflowTemplate = {
   jobs: WorkflowJob[];
   concurrency: TemplateToken;
   env: TemplateToken;
+  dependencies?: string[];
 
   errors?: {
     Message: string;

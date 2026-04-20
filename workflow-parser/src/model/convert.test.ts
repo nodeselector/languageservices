@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
+import {FeatureFlags} from "@actions/expressions/features";
 import {nullTrace} from "../test-utils/null-trace.js";
 import {parseWorkflow} from "../workflows/workflow-parser.js";
 import {convertWorkflowTemplate, ErrorPolicy} from "./convert.js";
@@ -658,6 +659,224 @@ jobs:
       expect(template.events?.schedule?.[0]).toEqual({
         cron: "0 0 * * *"
       });
+    });
+  });
+
+  describe("dependencies", () => {
+    it("parses valid dependencies when flag is enabled", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+dependencies:
+  - actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+  - actions/setup-go@v5:sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion,
+        featureFlags: new FeatureFlags({allowDependencies: true})
+      });
+
+      expect(template.dependencies).toEqual([
+        "actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683",
+        "actions/setup-go@v5:sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5"
+      ]);
+      expect(template.errors).toBeUndefined();
+    });
+
+    it("reports an error when dependencies are used while the flag is disabled", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion
+      });
+
+      expect(template.dependencies).toBeUndefined();
+      expect(template.errors).toHaveLength(1);
+      expect(template.errors?.[0].Message).toContain(
+        "The 'dependencies' key is experimental. Enable the 'allowDependencies' feature flag to use it."
+      );
+    });
+
+    it("reports error for malformed dependency entry", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - checkout@v4:sha1-abc123`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion,
+        featureFlags: new FeatureFlags({allowDependencies: true})
+      });
+
+      expect(template.dependencies).toEqual([]);
+      expect(template.errors).toBeDefined();
+      expect(template.errors!.length).toBeGreaterThan(0);
+      expect(template.errors![0].Message).toContain("Invalid dependency format");
+    });
+
+    it("reports error for missing algo prefix", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - actions/checkout@v4:abc123`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion,
+        featureFlags: new FeatureFlags({allowDependencies: true})
+      });
+
+      expect(template.dependencies).toEqual([]);
+      expect(template.errors).toBeDefined();
+      expect(template.errors![0].Message).toContain("Invalid dependency format");
+    });
+
+    it("accepts sha256 hash spec", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - actions/checkout@v4:sha256-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion,
+        featureFlags: new FeatureFlags({allowDependencies: true})
+      });
+
+      expect(template.dependencies).toEqual([
+        "actions/checkout@v4:sha256-a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+      ]);
+      expect(template.errors).toBeUndefined();
+    });
+
+    it("accepts subaction paths", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - actions/checkout/subaction@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion,
+        featureFlags: new FeatureFlags({allowDependencies: true})
+      });
+
+      expect(template.dependencies).toEqual([
+        "actions/checkout/subaction@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683"
+      ]);
+      expect(template.errors).toBeUndefined();
+    });
+
+    it("returns empty array when section is absent and flag enabled", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion,
+        featureFlags: new FeatureFlags({allowDependencies: true})
+      });
+
+      expect(template.dependencies).toBeUndefined();
+      expect(template.errors).toBeUndefined();
+    });
+
+    it("reports multiple format errors", async () => {
+      const result = parseWorkflow(
+        {
+          name: "wf.yaml",
+          content: `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - just-a-string
+  - actions/checkout@v4:sha1-abc123
+  - no-at-sign:sha1-abc123`
+        },
+        nullTrace
+      );
+
+      const template = await convertWorkflowTemplate(result.context, result.value!, undefined, {
+        errorPolicy: ErrorPolicy.TryConversion,
+        featureFlags: new FeatureFlags({allowDependencies: true})
+      });
+
+      // Only the valid entry should be in dependencies
+      expect(template.dependencies).toEqual(["actions/checkout@v4:sha1-abc123"]);
+      // Two errors for the invalid entries
+      expect(template.errors).toBeDefined();
+      expect(template.errors!.length).toBe(2);
     });
   });
 });

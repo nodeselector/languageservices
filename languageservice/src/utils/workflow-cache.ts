@@ -19,14 +19,27 @@ const workflowTemplateCache = new Map<string, WorkflowTemplate>();
 const actionTemplateCache = new Map<string, ActionTemplate>();
 
 export function clearCacheEntry(uri: string) {
-  parsedWorkflowCache.delete(uri);
-  parsedWorkflowCache.delete(cacheKey(uri, true));
+  const baseKey = cacheKey(uri, false);
+  const transformedKey = cacheKey(uri, true);
+
+  parsedWorkflowCache.delete(baseKey);
+  parsedWorkflowCache.delete(transformedKey);
   parsedActionCache.delete(uri);
-  parsedActionCache.delete(cacheKey(uri, true));
-  workflowTemplateCache.delete(uri);
-  workflowTemplateCache.delete(cacheKey(uri, true));
+  parsedActionCache.delete(transformedKey);
+
+  for (const key of workflowTemplateCache.keys()) {
+    if (
+      key === baseKey ||
+      key === transformedKey ||
+      key.startsWith(`${baseKey}|`) ||
+      key.startsWith(`${transformedKey}|`)
+    ) {
+      workflowTemplateCache.delete(key);
+    }
+  }
+
   actionTemplateCache.delete(uri);
-  actionTemplateCache.delete(cacheKey(uri, true));
+  actionTemplateCache.delete(transformedKey);
 }
 
 export function clearCache() {
@@ -81,7 +94,7 @@ export async function getOrConvertWorkflowTemplate(
   options?: WorkflowTemplateConverterOptions,
   transformed = false
 ): Promise<WorkflowTemplate> {
-  const key = cacheKey(uri, transformed);
+  const key = workflowTemplateCacheKey(uri, transformed, options);
   const cachedTemplate = workflowTemplateCache.get(key);
   if (cachedTemplate) {
     return cachedTemplate;
@@ -119,4 +132,20 @@ function cacheKey(uri: string, transformed: boolean): string {
     return `transformed-${uri}`;
   }
   return uri;
+}
+
+function workflowTemplateCacheKey(
+  uri: string,
+  transformed: boolean,
+  options?: WorkflowTemplateConverterOptions
+): string {
+  const baseKey = cacheKey(uri, transformed);
+  if (!options) {
+    return baseKey;
+  }
+
+  const enabledFeatures = options.featureFlags?.getEnabledFeatures().slice().sort().join(",") ?? "";
+  return `${baseKey}|depth:${options.fetchReusableWorkflowDepth ?? "default"}|maxDepth:${
+    options.maxReusableWorkflowDepth ?? "default"
+  }|policy:${options.errorPolicy ?? "default"}|features:${enabledFeatures}`;
 }

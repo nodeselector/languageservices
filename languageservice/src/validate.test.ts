@@ -1,3 +1,4 @@
+import {FeatureFlags} from "@actions/expressions/features";
 import {Diagnostic, DiagnosticSeverity} from "vscode-languageserver-types";
 import {createDocument} from "./test-utils/document.js";
 import {validate} from "./validate.js";
@@ -410,6 +411,72 @@ jobs:
       );
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe("dependencies validation", () => {
+    it("reports diagnostic for malformed dependency when flag enabled", async () => {
+      const result = await validate(
+        createDocument(
+          "wf.yaml",
+          `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - just-a-string`
+        ),
+        {
+          featureFlags: new FeatureFlags({allowDependencies: true})
+        }
+      );
+
+      expect(result.length).toBeGreaterThan(0);
+      expect(result.some(d => d.message.includes("Invalid dependency format"))).toBe(true);
+    });
+
+    it("no diagnostic for valid dependencies when flag enabled", async () => {
+      const result = await validate(
+        createDocument(
+          "wf.yaml",
+          `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683`
+        ),
+        {
+          featureFlags: new FeatureFlags({allowDependencies: true})
+        }
+      );
+
+      expect(result).toEqual([]);
+    });
+
+    it("reports a diagnostic for dependencies when flag disabled", async () => {
+      const result = await validate(
+        createDocument(
+          "wf.yaml",
+          `on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hello
+dependencies:
+  - just-a-string`
+        ),
+        {
+          featureFlags: new FeatureFlags({allowDependencies: false})
+        }
+      );
+
+      expect(result.some(d => d.message.includes("The 'dependencies' key is experimental"))).toBe(true);
     });
   });
 });

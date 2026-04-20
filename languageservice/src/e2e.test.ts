@@ -21,7 +21,7 @@ describe("end-to-end", () => {
     const result = await complete(...getPositionFromCursor(input));
 
     expect(result).not.toBeUndefined();
-    expect(result.length).toEqual(13);
+    expect(result.length).toEqual(14);
     const labelsWithDetails = result.map(x =>
       x.labelDetails?.description ? `${x.label} (${x.labelDetails.description})` : x.label
     );
@@ -29,6 +29,7 @@ describe("end-to-end", () => {
       "concurrency",
       "concurrency (full syntax)",
       "defaults",
+      "dependencies",
       "description",
       "env",
       "jobs",

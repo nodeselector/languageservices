@@ -48,7 +48,7 @@ jobs:
     const result = await complete(...getPositionFromCursor(input));
 
     expect(result).not.toBeUndefined();
-    expect(result.length).toEqual(13);
+    expect(result.length).toEqual(14);
     expect(result[0].label).toEqual("concurrency");
   });
 
