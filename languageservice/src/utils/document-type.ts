@@ -4,7 +4,7 @@
  * because files in non-standard locations wouldn't work as workflows/actions anyway.
  */
 
-export type DocumentType = "workflow" | "action" | "unknown";
+export type DocumentType = "workflow" | "action" | "dependency-lockfile" | "unknown";
 
 /**
  * Detects whether a document is a workflow file, action file, or unknown based on its URI.
@@ -22,6 +22,10 @@ export function detectDocumentType(uri: string): DocumentType {
   // This ensures .github/workflows/action.yml is treated as a workflow, not an action
   if (/\.github\/workflows(-lab)?\/[^/]+\.ya?ml$/i.test(normalizedUri)) {
     return "workflow";
+  }
+
+  if (/\.github\/actions\.lock\.ya?ml$/i.test(normalizedUri)) {
+    return "dependency-lockfile";
   }
 
   // Check for action.yml/action.yaml patterns
@@ -45,4 +49,11 @@ export function isActionDocument(uri: string): boolean {
  */
 export function isWorkflowDocument(uri: string): boolean {
   return detectDocumentType(uri) === "workflow";
+}
+
+/**
+ * Check if a document is an Actions dependency lockfile
+ */
+export function isDependencyLockfileDocument(uri: string): boolean {
+  return detectDocumentType(uri) === "dependency-lockfile";
 }

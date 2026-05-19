@@ -126,7 +126,10 @@ export function getOrConvertActionTemplate(
   return actionTemplate;
 }
 
-// Use a separate cache key for transformed documents
+/**
+ * Use a separate cache namespace for transformed documents so callers can
+ * safely cache both the original workflow text and a derived/transformed copy.
+ */
 function cacheKey(uri: string, transformed: boolean): string {
   if (transformed) {
     return `transformed-${uri}`;
@@ -134,6 +137,14 @@ function cacheKey(uri: string, transformed: boolean): string {
   return uri;
 }
 
+/**
+ * The converted workflow template depends on more than the document URI.
+ *
+ * Feature flags and conversion options can materially change the resulting
+ * template shape and emitted diagnostics for the same file. Include those
+ * inputs in the cache key so callers do not accidentally reuse a template
+ * produced under different parsing rules.
+ */
 function workflowTemplateCacheKey(
   uri: string,
   transformed: boolean,

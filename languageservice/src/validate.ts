@@ -28,7 +28,7 @@ import {wrapDictionary} from "./expression-validation/error-dictionary.js";
 import {ValidationEvaluator} from "./expression-validation/evaluator.js";
 import {validatorFunctions} from "./expression-validation/functions.js";
 import {error} from "./log.js";
-import {isActionDocument} from "./utils/document-type.js";
+import {isActionDocument, isDependencyLockfileDocument} from "./utils/document-type.js";
 import {findToken} from "./utils/find-token.js";
 import {mapRange} from "./utils/range.js";
 import {hasFormatWithLiteralText} from "./utils/validate-if.js";
@@ -36,6 +36,11 @@ import {validateStepUsesFormat, warnIfShortSha} from "./utils/validate-uses.js";
 import {getOrConvertWorkflowTemplate, getOrParseWorkflow} from "./utils/workflow-cache.js";
 import {validateActionReference} from "./validate-action-reference.js";
 import {validateAction} from "./validate-action.js";
+import {
+  DependencyLockfileProvider,
+  validateDependencyLockfile,
+  validateWorkflowUsesAgainstLockfile
+} from "./validate-dependency-lockfile.js";
 import {validateFormatCalls} from "./validate-format-string.js";
 import {ValueProviderConfig, ValueProviderKind} from "./value-providers/config.js";
 import {defaultValueProviders} from "./value-providers/default.js";
@@ -48,6 +53,7 @@ export type ValidationConfig = {
   contextProviderConfig?: ContextProviderConfig;
   actionsMetadataProvider?: ActionsMetadataProvider;
   fileProvider?: FileProvider;
+  dependencyLockfileProvider?: DependencyLockfileProvider;
   featureFlags?: FeatureFlags;
 };
 
@@ -62,9 +68,15 @@ export type ActionsMetadataProvider = {
  * @returns Array of diagnostics
  */
 export async function validate(textDocument: TextDocument, config?: ValidationConfig): Promise<Diagnostic[]> {
-  return isActionDocument(textDocument.uri)
-    ? validateAction(textDocument, config)
-    : validateWorkflow(textDocument, config);
+  if (isActionDocument(textDocument.uri)) {
+    return validateAction(textDocument, config);
+  }
+
+  if (isDependencyLockfileDocument(textDocument.uri)) {
+    return validateDependencyLockfile(textDocument, config?.featureFlags);
+  }
+
+  return validateWorkflow(textDocument, config);
 }
 
 /**
@@ -97,6 +109,13 @@ async function validateWorkflow(textDocument: TextDocument, config?: ValidationC
 
       // Validate expressions and value providers
       await additionalValidations(diagnostics, textDocument.uri, template, result.value, config, config?.featureFlags);
+      await validateWorkflowUsesAgainstLockfile(
+        diagnostics,
+        textDocument.uri,
+        template,
+        config?.dependencyLockfileProvider,
+        config?.featureFlags
+      );
     }
 
     // For now map parser errors directly to diagnostics

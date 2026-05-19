@@ -43,12 +43,14 @@ import {getActionsMetadataProvider} from "./utils/action-metadata.js";
 import {TTLCache} from "./utils/cache.js";
 import {timeOperation} from "./utils/timer.js";
 import {valueProviders} from "./value-providers.js";
+import * as vscodeURI from "vscode-uri";
 
 export function initConnection(connection: Connection) {
   const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
 
   let client: Octokit | undefined;
   let repos: RepositoryContext[] = [];
+  let workspaceUris: string[] = [];
   const cache = new TTLCache();
 
   let hasWorkspaceFolderCapability = false;
@@ -71,6 +73,8 @@ export function initConnection(connection: Connection) {
     if (options.repos) {
       repos = options.repos;
     }
+
+    workspaceUris = params.workspaceFolders?.map(folder => folder.uri) ?? [];
 
     if (options.logLevel !== undefined) {
       setLogLevel(options.logLevel);
@@ -124,7 +128,17 @@ export function initConnection(connection: Connection) {
   // when the text document first opened or when its content has changed.
   documents.onDidChangeContent(change => {
     clearCacheEntry(change.document.uri);
-    return timeOperation("validation", async () => await validateTextDocument(change.document));
+    return timeOperation("validation", async () => {
+      await validateTextDocument(change.document);
+      if (isDependencyLockfileUri(change.document.uri)) {
+        await Promise.all(
+          documents
+            .all()
+            .filter(doc => isWorkflowUri(doc.uri))
+            .map(doc => validateTextDocument(doc))
+        );
+      }
+    });
   });
 
   async function validateTextDocument(textDocument: TextDocument): Promise<void> {
@@ -137,6 +151,9 @@ export function initConnection(connection: Connection) {
       fileProvider: getFileProvider(client, cache, repoContext?.workspaceUri, async path => {
         return await connection.sendRequest(Requests.ReadFile, {path} satisfies ReadFileRequest);
       }),
+      dependencyLockfileProvider: {
+        getDependencyLockfile: async workflowUri => await getDependencyLockfile(workflowUri, repoContext)
+      },
       featureFlags
     };
 
@@ -208,10 +225,65 @@ export function initConnection(connection: Connection) {
 
   // Listen on the connection
   connection.listen();
+
+  async function getDependencyLockfile(workflowUri: string, repoContext: RepositoryContext | undefined) {
+    const workspaces = [
+      inferWorkspaceUri(workflowUri),
+      repoContext?.workspaceUri,
+      ...workspaceUris.filter(uri => workflowUri.startsWith(uri))
+    ].filter((uri, index, uris): uri is string => !!uri && uris.indexOf(uri) === index);
+
+    for (const workspace of workspaces) {
+      const workspaceUri = vscodeURI.URI.parse(workspace);
+      for (const lockfilePath of [".github/actions.lock.yml", ".github/actions.lock.yaml"]) {
+        const lockfileUri = vscodeURI.Utils.joinPath(workspaceUri, lockfilePath).toString();
+        const openDocument = documents.get(lockfileUri);
+        if (openDocument) {
+          return {
+            name: lockfilePath,
+            content: openDocument.getText()
+          };
+        }
+
+        try {
+          const content = await connection.sendRequest<string | undefined>(Requests.ReadFile, {
+            path: lockfileUri
+          });
+          if (content !== undefined) {
+            return {
+              name: lockfilePath,
+              content
+            };
+          }
+        } catch {
+          // Try the alternate extension before giving up on this workspace.
+        }
+      }
+    }
+
+    return undefined;
+  }
 }
 
 function getDocument(documents: TextDocuments<TextDocument>, id: TextDocumentIdentifier): TextDocument {
   // The text document manager should ensure all documents exist
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   return documents.get(id.uri)!;
+}
+
+function isDependencyLockfileUri(uri: string): boolean {
+  return /\.github\/actions\.lock\.ya?ml$/i.test(uri);
+}
+
+function isWorkflowUri(uri: string): boolean {
+  return /\.github\/workflows\/[^/]+\.ya?ml$/i.test(uri);
+}
+
+function inferWorkspaceUri(workflowUri: string): string | undefined {
+  const workflowsIndex = workflowUri.indexOf("/.github/workflows/");
+  if (workflowsIndex < 0) {
+    return undefined;
+  }
+
+  return workflowUri.substring(0, workflowsIndex);
 }
