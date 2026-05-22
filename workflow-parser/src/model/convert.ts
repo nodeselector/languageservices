@@ -5,7 +5,6 @@ import {FileProvider} from "../workflows/file-provider.js";
 import {parseFileReference} from "../workflows/file-reference.js";
 import {parseWorkflow} from "../workflows/workflow-parser.js";
 import {convertConcurrency} from "./converter/concurrency.js";
-import {convertDependencies} from "./converter/dependencies.js";
 import {convertOn} from "./converter/events.js";
 import {handleTemplateTokenErrors} from "./converter/handle-errors.js";
 import {convertJobs} from "./converter/jobs.js";
@@ -96,11 +95,6 @@ export async function convertWorkflowTemplate(
           break;
         case "env":
           result.env = item.value;
-          break;
-        case "dependencies":
-          result.dependencies = handleTemplateTokenErrors(root, context, undefined, () =>
-            convertDependencies(context, item.value, opts.featureFlags)
-          );
           break;
       }
     }

@@ -3,7 +3,7 @@ import {
   DependencyLockfileError,
   DependencyPin,
   dependencyIndexKey,
-  dependencyLockfileDependencyToPin,
+  parsePin,
   parseDependencyLockfile
 } from "@actions/workflow-parser/model/dependency-lockfile";
 import {isActionStep, isJob, isReusableWorkflowJob} from "@actions/workflow-parser/model/type-guards";
@@ -70,8 +70,8 @@ export async function validateWorkflowUsesAgainstLockfile(
   const workflowPath = workflowPathFromUri(workflowUri);
   const workflowLock = workflowPath ? lockfileResult.value.workflows[workflowPath] : undefined;
   const lockedDependencies = new Map<string, DependencyPin>();
-  for (const dependency of workflowLock?.dependencies ?? []) {
-    const pin = dependencyLockfileDependencyToPin(dependency);
+  for (const dep of workflowLock?.dependencies ?? []) {
+    const pin = parsePin(dep);
     if (pin) {
       lockedDependencies.set(dependencyIndexKey(pin), pin);
     }
@@ -140,7 +140,7 @@ function parseUsesReference(token: StringToken): UsesReference | undefined {
     return undefined;
   }
 
-  const sourcePath = uses.substring(0, atIdx).replace(/^github\.com\//, "");
+  const sourcePath = uses.substring(0, atIdx);
   const ref = uses.substring(atIdx + 1);
   const parts = sourcePath.split(/[\\/]/);
   if (parts.length < 2 || !parts[0] || !parts[1]) {
@@ -149,8 +149,8 @@ function parseUsesReference(token: StringToken): UsesReference | undefined {
 
   const path = parts.length > 2 ? parts.slice(2).join("/") : undefined;
   return {
-    owner: parts[0],
-    repo: parts[1],
+    owner: parts[0].toLowerCase(),
+    repo: parts[1].toLowerCase(),
     path,
     ref,
     token

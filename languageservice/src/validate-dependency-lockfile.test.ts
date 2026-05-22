@@ -11,15 +11,17 @@ describe("validate dependency lockfile", () => {
     const result = await validate(
       createDocument(
         ".github/actions.lock.yml",
-        `version: v1
+        `version: v0.0.1
+actions:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    ref: v4
+    sha: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 2
 workflows:
   .github/workflows/ci.yml:
     dependencies:
-      - owner: actions
-        repo: checkout
-        ref: v4
-        algorithm: sha1
-        digest: 11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
 `
       ),
       config
@@ -33,10 +35,11 @@ workflows:
       createDocument(
         ".github/actions.lock.yml",
         `version: v2
+actions: {}
 workflows:
   .github/workflows/ci.yml:
     dependencies:
-      - entry: actions/checkout@v4:sha1-abc123
+      - actions/checkout@v4:sha1-abc123
 `
       ),
       config
@@ -44,7 +47,7 @@ workflows:
 
     expect(result.map(diagnostic => diagnostic.message)).toEqual([
       'unsupported dependency lockfile version "v2"',
-      'invalid dependency lock entry for workflow ".github/workflows/ci.yml"'
+      'invalid dependency lock entry for workflow ".github/workflows/ci.yml": "actions/checkout@v4:sha1-abc123"'
     ]);
   });
 
@@ -70,7 +73,8 @@ workflows: nope
   it("reports workflow uses references that are missing from the lockfile", async () => {
     const result = await validate(
       workflowDocument(),
-      workflowConfig(`version: v1
+      workflowConfig(`version: v0.0.1
+actions: {}
 workflows:
   .github/workflows/ci.yml:
     dependencies: []
@@ -85,15 +89,17 @@ workflows:
   it("reports workflow uses references whose ref is not present in the lockfile", async () => {
     const result = await validate(
       workflowDocument(),
-      workflowConfig(`version: v1
+      workflowConfig(`version: v0.0.1
+actions:
+  actions/checkout@v3:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    ref: v3
+    sha: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 1
+    repo_id: 2
 workflows:
   .github/workflows/ci.yml:
     dependencies:
-      - owner: actions
-        repo: checkout
-        ref: v3
-        algorithm: sha1
-        digest: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - actions/checkout@v3:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 `)
     );
 
@@ -115,7 +121,8 @@ jobs:
       - uses: docker://alpine:3.20
 `
       ),
-      workflowConfig(`version: v1
+      workflowConfig(`version: v0.0.1
+actions: {}
 workflows:
   .github/workflows/local.yml:
     dependencies: []
@@ -159,14 +166,16 @@ function workflowConfig(lockfileContent: string | undefined): ValidationConfig {
 }
 
 function lockfileContent() {
-  return `version: v1
+  return `version: v0.0.1
+actions:
+  actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
+    ref: v4
+    sha: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    owner_id: 1
+    repo_id: 2
 workflows:
   .github/workflows/ci.yml:
     dependencies:
-      - owner: actions
-        repo: checkout
-        ref: v4
-        algorithm: sha1
-        digest: 11bd71901bbe5b1630ceea73d27597364c9af683
+      - actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683
 `;
 }

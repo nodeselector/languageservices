@@ -1,16 +1,16 @@
 export {convertWorkflowTemplate} from "./model/convert.js";
 export {
-  ActionDependency,
   DependencyLockfile,
-  DependencyLockfileDependency,
   DependencyLockfileError,
   DependencyLockfileWorkflow,
   DependencyPin,
+  LockfileAction,
   ParseDependencyLockfileResult,
   dependencyIndexKey,
-  dependencyLockfileDependencyToPin,
-  parseDependencyEntry,
-  parseDependencyLockfile
+  dependencyLockfileVersion,
+  parsePin,
+  parseDependencyLockfile,
+  pinString
 } from "./model/dependency-lockfile.js";
 export {WorkflowTemplate} from "./model/workflow-template.js";
 export * from "./templates/tokens/type-guards.js";

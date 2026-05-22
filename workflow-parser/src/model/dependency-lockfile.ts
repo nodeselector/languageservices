@@ -12,28 +12,20 @@ export type DependencyPin = {
   digest: string;
 };
 
-export type ActionDependency = {
-  nwo?: string;
-  source?: string;
-  owner?: string;
-  repo?: string;
-  path?: string;
+export type LockfileAction = {
   ref?: string;
-  algorithm?: string;
-  digest?: string;
-  workflow?: string;
-};
-
-export type DependencyLockfileDependency = ActionDependency & {
-  entry?: string;
+  sha?: string;
+  ownerId: number;
+  repoId: number;
 };
 
 export type DependencyLockfileWorkflow = {
-  dependencies: DependencyLockfileDependency[];
+  dependencies: string[];
 };
 
 export type DependencyLockfile = {
   version: string;
+  actions: Record<string, LockfileAction>;
   workflows: Record<string, DependencyLockfileWorkflow>;
 };
 
@@ -48,7 +40,7 @@ export type ParseDependencyLockfileResult = {
   errors: DependencyLockfileError[];
 };
 
-const dependencyLockfileVersion = "v1";
+export const dependencyLockfileVersion = "v0.0.1";
 
 export function parseDependencyLockfile(name: string, content: string): ParseDependencyLockfileResult {
   const lineCounter = new LineCounter();
@@ -74,6 +66,7 @@ export function parseDependencyLockfile(name: string, content: string): ParseDep
 
   const result: DependencyLockfile = {
     version: "",
+    actions: {},
     workflows: {}
   };
 
@@ -96,11 +89,20 @@ export function parseDependencyLockfile(name: string, content: string): ParseDep
     }
   }
 
+  const actionsPair = findPair(root, "actions");
+  if (actionsPair?.value) {
+    if (isMap(actionsPair.value)) {
+      readActions(name, actionsPair.value, lineCounter, errors, result.actions);
+    } else {
+      errors.push(createError(name, "Expected a mapping for 'actions'", getRange(actionsPair.value, lineCounter)));
+    }
+  }
+
   const workflowsPair = findPair(root, "workflows");
   if (!workflowsPair?.value) {
     errors.push(createError(name, "dependency lockfile workflows are required", getRange(root, lineCounter)));
   } else if (isMap(workflowsPair.value)) {
-    readWorkflows(name, workflowsPair.value, lineCounter, errors, result.workflows);
+    readWorkflows(name, workflowsPair.value, lineCounter, errors, result);
   } else {
     errors.push(createError(name, "Expected a mapping for 'workflows'", getRange(workflowsPair.value, lineCounter)));
   }
@@ -108,15 +110,19 @@ export function parseDependencyLockfile(name: string, content: string): ParseDep
   return errors.length > 0 ? {errors} : {value: result, errors};
 }
 
-export function parseDependencyEntry(entry: string): DependencyPin | undefined {
+/**
+ * Parse a canonical pin string of the form OWNER/REPO[/PATH]@REF:ALGO-HEX.
+ * No `github.com/` prefix is accepted. Owner, repo, algorithm and digest are
+ * lowercased; ref and path preserve source casing.
+ */
+export function parsePin(entry: string): DependencyPin | undefined {
   const atIdx = entry.indexOf("@");
   if (atIdx <= 0 || atIdx === entry.length - 1) {
     return undefined;
   }
 
-  let repoPath = entry.substring(0, atIdx);
+  const repoPath = entry.substring(0, atIdx);
   const refHash = entry.substring(atIdx + 1);
-  repoPath = repoPath.replace(/^github\.com\//, "");
 
   const slashIdx = repoPath.indexOf("/");
   if (slashIdx <= 0 || slashIdx === repoPath.length - 1) {
@@ -145,8 +151,8 @@ export function parseDependencyEntry(entry: string): DependencyPin | undefined {
     return undefined;
   }
 
-  const algorithm = hashSpec.substring(0, dashIdx);
-  const digest = hashSpec.substring(dashIdx + 1);
+  const algorithm = hashSpec.substring(0, dashIdx).toLowerCase();
+  const digest = hashSpec.substring(dashIdx + 1).toLowerCase();
   if (!isValidDependencyDigest(algorithm, digest)) {
     return undefined;
   }
@@ -159,10 +165,12 @@ export function parseDependencyEntry(entry: string): DependencyPin | undefined {
     path = repoAndPath.substring(pathIdx + 1);
   }
 
+  const ownerLc = owner.toLowerCase();
+  const repoLc = repo.toLowerCase();
   return {
-    nwo: `${owner}/${repo}`,
-    owner,
-    repo,
+    nwo: `${ownerLc}/${repoLc}`,
+    owner: ownerLc,
+    repo: repoLc,
     path,
     ref,
     algorithm,
@@ -170,12 +178,90 @@ export function parseDependencyEntry(entry: string): DependencyPin | undefined {
   };
 }
 
+/** Stringifies a pin in canonical form: OWNER/REPO[/PATH]@REF:ALGO-HEX. */
+export function pinString(pin: DependencyPin): string {
+  const path = pin.path ? `/${pin.path}` : "";
+  return `${pin.owner}/${pin.repo}${path}@${pin.ref}:${pin.algorithm}-${pin.digest}`;
+}
+
+/** Index key used for dedup / lookup: OWNER/REPO[/PATH]@REF (no algo/hex). */
+export function dependencyIndexKey(pin: DependencyPin): string {
+  const path = pin.path ? `/${pin.path}` : "";
+  return `${pin.owner}/${pin.repo}${path}@${pin.ref}`;
+}
+
+function readActions(
+  name: string,
+  actions: YAMLMap.Parsed,
+  lineCounter: LineCounter,
+  errors: DependencyLockfileError[],
+  result: Record<string, LockfileAction>
+) {
+  for (const item of actions.items) {
+    const actionKey = readKey(name, item, "action key", lineCounter, errors);
+    if (!actionKey || !item.value) {
+      continue;
+    }
+
+    if (parsePin(actionKey) === undefined) {
+      errors.push(
+        createError(
+          name,
+          `invalid action key in lockfile: ${JSON.stringify(actionKey)}`,
+          getRange(item.key, lineCounter)
+        )
+      );
+      continue;
+    }
+
+    if (!isMap(item.value)) {
+      errors.push(
+        createError(
+          name,
+          `Expected a mapping for action ${JSON.stringify(actionKey)}`,
+          getRange(item.value, lineCounter)
+        )
+      );
+      continue;
+    }
+
+    const action: LockfileAction = {ownerId: 0, repoId: 0};
+    for (const pair of item.value.items) {
+      const key = readKey(name, pair, "action field", lineCounter, errors);
+      if (!key || !pair.value) {
+        continue;
+      }
+
+      switch (key) {
+        case "ref":
+          action.ref = readString(name, pair.value, key, lineCounter, errors);
+          break;
+        case "sha":
+          action.sha = readString(name, pair.value, key, lineCounter, errors);
+          break;
+        case "owner_id": {
+          const v = readNumber(name, pair.value, key, lineCounter, errors);
+          if (v !== undefined) action.ownerId = v;
+          break;
+        }
+        case "repo_id": {
+          const v = readNumber(name, pair.value, key, lineCounter, errors);
+          if (v !== undefined) action.repoId = v;
+          break;
+        }
+      }
+    }
+
+    result[actionKey] = action;
+  }
+}
+
 function readWorkflows(
   name: string,
   workflows: YAMLMap.Parsed,
   lineCounter: LineCounter,
   errors: DependencyLockfileError[],
-  result: Record<string, DependencyLockfileWorkflow>
+  result: DependencyLockfile
 ) {
   for (const item of workflows.items) {
     const workflowPath = readKey(name, item, "workflow path", lineCounter, errors);
@@ -194,7 +280,7 @@ function readWorkflows(
       continue;
     }
 
-    result[workflowPath] = readWorkflow(name, workflowPath, item.value, lineCounter, errors);
+    result.workflows[workflowPath] = readWorkflow(name, workflowPath, item.value, lineCounter, errors, result.actions);
   }
 }
 
@@ -203,7 +289,8 @@ function readWorkflow(
   workflowPath: string,
   workflow: YAMLMap.Parsed,
   lineCounter: LineCounter,
-  errors: DependencyLockfileError[]
+  errors: DependencyLockfileError[],
+  actions: Record<string, LockfileAction>
 ): DependencyLockfileWorkflow {
   const dependenciesPair = findPair(workflow, "dependencies");
   if (!dependenciesPair?.value) {
@@ -217,20 +304,41 @@ function readWorkflow(
     return {dependencies: []};
   }
 
-  const dependencies: DependencyLockfileDependency[] = [];
+  const dependencies: string[] = [];
   const seen = new Map<string, DependencyPin>();
   for (const item of dependenciesPair.value.items) {
-    const dependency = readDependency(name, workflowPath, item, lineCounter, errors);
-    if (!dependency) {
+    if (!isScalar(item) || typeof item.value !== "string") {
+      errors.push(
+        createError(
+          name,
+          `invalid dependency entry for workflow ${JSON.stringify(workflowPath)}: expected a pin string`,
+          getRange(item, lineCounter)
+        )
+      );
       continue;
     }
 
-    const pin = dependencyLockfileDependencyToPin(dependency);
+    const dep = item.value;
+    const pin = parsePin(dep);
     if (!pin) {
       errors.push(
         createError(
           name,
-          `invalid dependency lock entry for workflow ${JSON.stringify(workflowPath)}`,
+          `invalid dependency lock entry for workflow ${JSON.stringify(workflowPath)}: ${JSON.stringify(dep)}`,
+          getRange(item, lineCounter)
+        )
+      );
+      continue;
+    }
+
+    const actionKey = pinString(pin);
+    if (!(actionKey in actions)) {
+      errors.push(
+        createError(
+          name,
+          `workflow ${JSON.stringify(workflowPath)} references action ${JSON.stringify(
+            actionKey
+          )} not present in actions:`,
           getRange(item, lineCounter)
         )
       );
@@ -253,100 +361,10 @@ function readWorkflow(
     }
 
     seen.set(key, pin);
-    dependencies.push({...dependency, workflow: workflowLockKey(workflowPath)});
+    dependencies.push(actionKey);
   }
 
   return {dependencies};
-}
-
-function readDependency(
-  name: string,
-  workflowPath: string,
-  item: ParsedNode | null,
-  lineCounter: LineCounter,
-  errors: DependencyLockfileError[]
-): DependencyLockfileDependency | undefined {
-  if (!isMap(item)) {
-    errors.push(
-      createError(
-        name,
-        `invalid dependency lock entry for workflow ${JSON.stringify(workflowPath)}`,
-        getRange(item, lineCounter)
-      )
-    );
-    return undefined;
-  }
-
-  const dependency: DependencyLockfileDependency = {};
-  for (const pair of item.items) {
-    const key = readKey(name, pair, "dependency key", lineCounter, errors);
-    if (!key || !pair.value) {
-      continue;
-    }
-
-    switch (key) {
-      case "entry":
-      case "nwo":
-      case "source":
-      case "owner":
-      case "repo":
-      case "path":
-      case "ref":
-      case "algorithm":
-      case "digest":
-        dependency[key] = readString(name, pair.value, key, lineCounter, errors);
-        break;
-    }
-  }
-
-  return dependency;
-}
-
-export function dependencyLockfileDependencyToPin(dependency: DependencyLockfileDependency): DependencyPin | undefined {
-  if (dependency.entry) {
-    return parseDependencyEntry(dependency.entry);
-  }
-
-  let owner = dependency.owner;
-  let repo = dependency.repo;
-  let path = dependency.path;
-  const source = dependency.nwo || dependency.source;
-
-  if ((!owner || !repo) && source) {
-    const sourcePath = source.replace(/^github\.com\//, "");
-    const parts = sourcePath.split("/");
-    if (parts.length >= 2) {
-      owner = parts[0];
-      repo = parts[1];
-      if (!path && parts.length > 2) {
-        path = parts.slice(2).join("/");
-      }
-    }
-  }
-
-  const algorithm = dependency.algorithm?.toLowerCase();
-  const digest = dependency.digest?.toLowerCase();
-  if (!owner || !repo || !dependency.ref || !algorithm || !digest) {
-    return undefined;
-  }
-
-  if (hasEmptyDependencyPathSegment(repo) || (path && hasEmptyDependencyPathSegment(path))) {
-    return undefined;
-  }
-
-  if (!isValidDependencyDigest(algorithm, digest)) {
-    return undefined;
-  }
-
-  return {
-    nwo: `${owner}/${repo}`,
-    owner,
-    repo,
-    path,
-    ref: dependency.ref,
-    algorithm,
-    digest
-  };
 }
 
 function findPair(map: YAMLMap.Parsed, key: string): Pair<ParsedNode, ParsedNode | null> | undefined {
@@ -378,20 +396,19 @@ function readString(
   return undefined;
 }
 
-export function dependencyIndexKey(pin: DependencyPin): string {
-  const path = pin.path ? `/${pin.path}` : "";
-  return `${pin.owner}/${pin.repo}${path}@${pin.ref}`;
-}
-
-function workflowLockKey(workflowPath: string): string {
-  const withoutRef = workflowPath.includes("@")
-    ? workflowPath.substring(0, workflowPath.lastIndexOf("@"))
-    : workflowPath;
-  const parts = withoutRef.split("/");
-  if (parts.length > 2 && parts[2] === ".github") {
-    return parts.slice(2).join("/");
+function readNumber(
+  name: string,
+  node: ParsedNode,
+  label: string,
+  lineCounter: LineCounter,
+  errors: DependencyLockfileError[]
+): number | undefined {
+  if (isScalar(node) && typeof node.value === "number" && Number.isFinite(node.value)) {
+    return node.value;
   }
-  return withoutRef;
+
+  errors.push(createError(name, `Expected a number for '${label}'`, getRange(node, lineCounter)));
+  return undefined;
 }
 
 function hasEmptyDependencyPathSegment(repoAndPath: string): boolean {
