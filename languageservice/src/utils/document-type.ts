@@ -24,7 +24,7 @@ export function detectDocumentType(uri: string): DocumentType {
     return "workflow";
   }
 
-  if (/\.github\/actions\.lock\.ya?ml$/i.test(normalizedUri)) {
+  if (/\.github\/workflows\/actions\.lock$/i.test(normalizedUri)) {
     return "dependency-lockfile";
   }
 

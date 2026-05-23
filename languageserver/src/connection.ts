@@ -242,29 +242,28 @@ export function initConnection(connection: Connection) {
 
     for (const workspace of workspaces) {
       const workspaceUri = vscodeURI.URI.parse(workspace);
-      for (const lockfilePath of [".github/actions.lock.yml", ".github/actions.lock.yaml"]) {
-        const lockfileUri = vscodeURI.Utils.joinPath(workspaceUri, lockfilePath).toString();
-        const openDocument = documents.get(lockfileUri);
-        if (openDocument) {
+      const lockfilePath = ".github/workflows/actions.lock";
+      const lockfileUri = vscodeURI.Utils.joinPath(workspaceUri, lockfilePath).toString();
+      const openDocument = documents.get(lockfileUri);
+      if (openDocument) {
+        return {
+          name: lockfilePath,
+          content: openDocument.getText()
+        };
+      }
+
+      try {
+        const content = await connection.sendRequest<string | undefined>(Requests.ReadFile, {
+          path: lockfileUri
+        });
+        if (content !== undefined) {
           return {
             name: lockfilePath,
-            content: openDocument.getText()
+            content
           };
         }
-
-        try {
-          const content = await connection.sendRequest<string | undefined>(Requests.ReadFile, {
-            path: lockfileUri
-          });
-          if (content !== undefined) {
-            return {
-              name: lockfilePath,
-              content
-            };
-          }
-        } catch {
-          // Try the alternate extension before giving up on this workspace.
-        }
+      } catch {
+        // Try next workspace.
       }
     }
 
@@ -279,7 +278,7 @@ function getDocument(documents: TextDocuments<TextDocument>, id: TextDocumentIde
 }
 
 function isDependencyLockfileUri(uri: string): boolean {
-  return /\.github\/actions\.lock\.ya?ml$/i.test(uri);
+  return /\.github\/workflows\/actions\.lock$/i.test(uri);
 }
 
 function isWorkflowUri(uri: string): boolean {

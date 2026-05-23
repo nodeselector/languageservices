@@ -50,7 +50,7 @@ export async function validateWorkflowUsesAgainstLockfile(
   if (!lockfile) {
     for (const usesReference of usesReferences) {
       diagnostics.push({
-        message: `Action reference '${usesReference.token.value}' is not present in .github/actions.lock.yml`,
+        message: `Action reference '${usesReference.token.value}' is not present in .github/workflows/actions.lock`,
         range: mapRange(usesReference.token.range)
       });
     }

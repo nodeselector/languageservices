@@ -7,10 +7,10 @@ const config = {
 };
 
 describe("validate dependency lockfile", () => {
-  it("validates .github/actions.lock.yml as a standalone lockfile", async () => {
+  it("validates .github/workflows/actions.lock as a standalone lockfile", async () => {
     const result = await validate(
       createDocument(
-        ".github/actions.lock.yml",
+        ".github/workflows/actions.lock",
         `version: v0.0.1
 actions:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
@@ -33,7 +33,7 @@ workflows:
   it("reports standalone lockfile errors", async () => {
     const result = await validate(
       createDocument(
-        ".github/actions.lock.yml",
+        ".github/workflows/actions.lock",
         `version: v2
 actions: {}
 workflows:
@@ -54,7 +54,7 @@ workflows:
   it("does not validate standalone lockfiles unless dependency validation is enabled", async () => {
     const result = await validate(
       createDocument(
-        ".github/actions.lock.yml",
+        ".github/workflows/actions.lock",
         `version: v2
 workflows: nope
 `
@@ -82,7 +82,7 @@ workflows:
     );
 
     expect(result.map(diagnostic => diagnostic.message)).toEqual([
-      "Action reference 'actions/checkout@v4' is not present in .github/actions.lock.yml"
+      "Action reference 'actions/checkout@v4' is not present in .github/workflows/actions.lock"
     ]);
   });
 
@@ -104,7 +104,7 @@ workflows:
     );
 
     expect(result.map(diagnostic => diagnostic.message)).toEqual([
-      "Action reference 'actions/checkout@v4' is not present in .github/actions.lock.yml"
+      "Action reference 'actions/checkout@v4' is not present in .github/workflows/actions.lock"
     ]);
   });
 
@@ -157,7 +157,7 @@ function workflowConfig(lockfileContent: string | undefined): ValidationConfig {
         }
 
         return {
-          name: ".github/actions.lock.yml",
+          name: ".github/workflows/actions.lock",
           content: lockfileContent
         };
       }
