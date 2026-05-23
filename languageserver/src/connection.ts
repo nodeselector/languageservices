@@ -44,6 +44,7 @@ import {TTLCache} from "./utils/cache.js";
 import {timeOperation} from "./utils/timer.js";
 import {valueProviders} from "./value-providers.js";
 import * as vscodeURI from "vscode-uri";
+import {OctokitActionResolver} from "./action-resolver.js";
 
 export function initConnection(connection: Connection) {
   const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -55,6 +56,8 @@ export function initConnection(connection: Connection) {
 
   let hasWorkspaceFolderCapability = false;
   let featureFlags = new FeatureFlags();
+  let pinIntegrityEnabled = false;
+  let actionResolver: OctokitActionResolver | undefined;
 
   // Register remote console logger with language service
   registerLogger(connection.console);
@@ -69,6 +72,9 @@ export function initConnection(connection: Connection) {
     if (options.sessionToken) {
       client = getClient(options.sessionToken, options.userAgent, options.gitHubApiUrl);
     }
+
+    pinIntegrityEnabled = options.pinIntegrityEnabled === true;
+    actionResolver = pinIntegrityEnabled && client ? new OctokitActionResolver(client, cache) : undefined;
 
     if (options.repos) {
       repos = options.repos;
@@ -154,6 +160,7 @@ export function initConnection(connection: Connection) {
       dependencyLockfileProvider: {
         getDependencyLockfile: async workflowUri => await getDependencyLockfile(workflowUri, repoContext)
       },
+      pinIntegrity: actionResolver ? {actionResolver} : undefined,
       featureFlags
     };
 

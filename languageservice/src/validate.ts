@@ -41,6 +41,7 @@ import {
   validateDependencyLockfile,
   validateWorkflowUsesAgainstLockfile
 } from "./validate-dependency-lockfile.js";
+import {PinIntegrityConfig, validateWorkflowPinIntegrity} from "./validate-pin-integrity.js";
 import {validateFormatCalls} from "./validate-format-string.js";
 import {ValueProviderConfig, ValueProviderKind} from "./value-providers/config.js";
 import {defaultValueProviders} from "./value-providers/default.js";
@@ -54,6 +55,7 @@ export type ValidationConfig = {
   actionsMetadataProvider?: ActionsMetadataProvider;
   fileProvider?: FileProvider;
   dependencyLockfileProvider?: DependencyLockfileProvider;
+  pinIntegrity?: PinIntegrityConfig;
   featureFlags?: FeatureFlags;
 };
 
@@ -114,6 +116,14 @@ async function validateWorkflow(textDocument: TextDocument, config?: ValidationC
         textDocument.uri,
         template,
         config?.dependencyLockfileProvider,
+        config?.featureFlags
+      );
+      await validateWorkflowPinIntegrity(
+        diagnostics,
+        textDocument.uri,
+        template,
+        config?.dependencyLockfileProvider,
+        config?.pinIntegrity,
         config?.featureFlags
       );
     }

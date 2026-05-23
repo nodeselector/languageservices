@@ -35,6 +35,13 @@ export interface InitializationOptions {
    * Features listed here may change or be removed without notice.
    */
   experimentalFeatures?: ExperimentalFeatures;
+
+  /**
+   * Opt-in pin integrity diagnostics. When true, the language server will
+   * use the configured GitHub client to detect stale, moved, forged, and
+   * imposter SHAs in lockfile-pinned action references. Off by default.
+   */
+  pinIntegrityEnabled?: boolean;
 }
 
 export interface RepositoryContext {
