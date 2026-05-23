@@ -75,11 +75,15 @@ export async function checkRefMovedAndForgery(
         remediation: "investigate immediately — verify the lockfile entry against upstream history"
       });
     } else {
+      let message = `ref ${u.ref} now resolves to ${shortSha(res.sha)}, lockfile pins ${shortSha(pin.digest)}`;
+      if (ancestry === "unknown") {
+        message += " (ancestry check inconclusive)";
+      }
       out.push({
         ...base,
         code: DiagnosticCodes.RefMoved,
         severity: "warning",
-        message: `ref ${u.ref} now resolves to ${shortSha(res.sha)}, lockfile pins ${shortSha(pin.digest)}`,
+        message,
         remediation: "re-run `gh actions-pin` to refresh the lock entry"
       });
     }
