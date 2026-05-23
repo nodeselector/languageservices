@@ -12,6 +12,7 @@ export {
   parseDependencyLockfile,
   pinString
 } from "./model/dependency-lockfile.js";
+export * as lockfileDiagnostics from "./lockfile/diagnostics/index.js";
 export {WorkflowTemplate} from "./model/workflow-template.js";
 export * from "./templates/tokens/type-guards.js";
 export {NoOperationTraceWriter, TraceWriter} from "./templates/trace-writer.js";
