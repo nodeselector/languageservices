@@ -17,6 +17,12 @@ export type LockfileAction = {
   sha?: string;
   ownerId: number;
   repoId: number;
+  /**
+   * Source range of the action's map key in the lockfile YAML. Populated
+   * by {@link parseDependencyLockfile} so coherence validators (e.g.
+   * inner-ref-vs-key drift) can attach diagnostics to the entry.
+   */
+  keyRange?: TokenRange;
 };
 
 export type DependencyLockfileWorkflow = {
@@ -107,7 +113,7 @@ export function parseDependencyLockfile(name: string, content: string): ParseDep
     errors.push(createError(name, "Expected a mapping for 'workflows'", getRange(workflowsPair.value, lineCounter)));
   }
 
-  return errors.length > 0 ? {errors} : {value: result, errors};
+  return {value: result, errors};
 }
 
 /**
@@ -225,7 +231,7 @@ function readActions(
       continue;
     }
 
-    const action: LockfileAction = {ownerId: 0, repoId: 0};
+    const action: LockfileAction = {ownerId: 0, repoId: 0, keyRange: getRange(item.key, lineCounter)};
     for (const pair of item.value.items) {
       const key = readKey(name, pair, "action field", lineCounter, errors);
       if (!key || !pair.value) {

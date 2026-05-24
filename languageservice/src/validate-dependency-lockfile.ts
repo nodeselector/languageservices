@@ -1,4 +1,5 @@
 import {FeatureFlags} from "@actions/expressions";
+import {DOC_URLS, releasesUrl} from "@actions/workflow-parser/lockfile/diagnostics/doc-urls";
 import {
   DependencyLockfileError,
   DependencyPin,
@@ -12,6 +13,7 @@ import {StringToken} from "@actions/workflow-parser/templates/tokens/string-toke
 import {File} from "@actions/workflow-parser/workflows/file";
 import {TextDocument} from "vscode-languageserver-textdocument";
 import {Diagnostic, URI} from "vscode-languageserver-types";
+import type {LockfileDiagnosticData} from "./lockfile-diagnostic-data.js";
 import {mapRange} from "./utils/range.js";
 
 export type DependencyLockfileProvider = {
@@ -24,10 +26,44 @@ export function validateDependencyLockfile(textDocument: TextDocument, featureFl
   }
 
   const result = parseDependencyLockfile(textDocument.uri, textDocument.getText());
-  return result.errors.map((err: DependencyLockfileError) => ({
+  const diagnostics: Diagnostic[] = result.errors.map((err: DependencyLockfileError) => ({
     message: err.rawMessage,
     range: mapRange(err.range)
   }));
+
+  // Coherence pass: an action entry whose inner `ref:` field disagrees
+  // with its key's ref is effectively orphaned — workflow uses keyed on
+  // the key ref won't actually be pinned. Surface as an error on the
+  // action entry so the lockfile is the place to fix it.
+  if (result.value) {
+    const referencedKeys = new Set<string>();
+    for (const wf of Object.values(result.value.workflows)) {
+      for (const dep of wf.dependencies) referencedKeys.add(dep);
+    }
+    for (const [actionKey, action] of Object.entries(result.value.actions)) {
+      const keyPin = parsePin(actionKey);
+      if (keyPin && action.ref && keyPin.ref !== action.ref) {
+        diagnostics.push({
+          message: `lockfile action ${JSON.stringify(actionKey)} has ref ${JSON.stringify(
+            action.ref
+          )} but its key pins ref ${JSON.stringify(
+            keyPin.ref
+          )} — re-run \`gh actions-pin\` to reconcile, or remove the entry`,
+          range: mapRange(action.keyRange)
+        });
+      }
+      if (!referencedKeys.has(actionKey)) {
+        diagnostics.push({
+          message: `lockfile action ${JSON.stringify(
+            actionKey
+          )} is orphaned — no workflow's dependencies reference it; remove the entry or re-run \`gh actions-pin\``,
+          range: mapRange(action.keyRange)
+        });
+      }
+    }
+  }
+
+  return diagnostics;
 }
 
 export async function validateWorkflowUsesAgainstLockfile(
@@ -49,10 +85,13 @@ export async function validateWorkflowUsesAgainstLockfile(
   const lockfile = await dependencyLockfileProvider.getDependencyLockfile(workflowUri);
   if (!lockfile) {
     for (const usesReference of usesReferences) {
-      diagnostics.push({
-        message: `Action reference '${usesReference.token.value}' is not present in .github/workflows/actions.lock`,
-        range: mapRange(usesReference.token.range)
-      });
+      diagnostics.push(
+        notPinnedDiagnostic(
+          usesReference,
+          `Action reference '${usesReference.token.value}' is not present in .github/workflows/actions.lock`,
+          workflowPathFromUri(workflowUri)
+        )
+      );
     }
     return;
   }
@@ -80,12 +119,42 @@ export async function validateWorkflowUsesAgainstLockfile(
   for (const usesReference of usesReferences) {
     const lockedPin = lockedDependencies.get(usesIndexKey(usesReference));
     if (!lockedPin) {
-      diagnostics.push({
-        message: `Action reference '${usesReference.token.value}' is not present in ${lockfile.name}`,
-        range: mapRange(usesReference.token.range)
-      });
+      diagnostics.push(
+        notPinnedDiagnostic(
+          usesReference,
+          `Action reference '${usesReference.token.value}' is not present in ${lockfile.name}`,
+          workflowPath
+        )
+      );
     }
   }
+}
+
+/**
+ * Build a NOT_PINNED diagnostic with the same enrichment shape
+ * (code, codeDescription, data) used by validate-pin-integrity, so the
+ * lockfile quick-fix provider can handle both surfaces uniformly.
+ */
+function notPinnedDiagnostic(ref: UsesReference, message: string, workflowPath: string | undefined): Diagnostic {
+  const data: LockfileDiagnosticData = {
+    kind: "lockfile",
+    code: "not_pinned",
+    owner: ref.owner,
+    repo: ref.repo,
+    path: ref.path ?? "",
+    ref: ref.ref,
+    workflowPath: workflowPath ?? "",
+    docUrl: DOC_URLS.not_pinned,
+    releaseUrl: releasesUrl(ref.owner, ref.repo, ref.ref)
+  };
+  return {
+    message,
+    range: mapRange(ref.token.range),
+    code: "not_pinned",
+    codeDescription: {href: DOC_URLS.not_pinned},
+    source: "github-actions",
+    data
+  };
 }
 
 type UsesReference = {

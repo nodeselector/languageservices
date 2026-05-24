@@ -68,13 +68,15 @@ workflows:
           ref: "v4",
           sha: "sha1-11bd71901bbe5b1630ceea73d27597364c9af683",
           ownerId: 1,
-          repoId: 2
+          repoId: 2,
+          keyRange: expect.any(Object)
         },
         "actions/setup-go@v5:sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5": {
           ref: "v5",
           sha: "sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5",
           ownerId: 1,
-          repoId: 3
+          repoId: 3,
+          keyRange: expect.any(Object)
         }
       },
       workflows: {

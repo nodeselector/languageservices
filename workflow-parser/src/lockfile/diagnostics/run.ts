@@ -1,6 +1,7 @@
 import type {DependencyLockfile} from "../../model/dependency-lockfile.js";
 import type {Finding} from "./codes.js";
 import {DiagnosticCodes} from "./codes.js";
+import {DOC_URLS} from "./doc-urls.js";
 import type {UsesRef, WorkflowInput} from "./input.js";
 import {usesIndexKey} from "./input.js";
 import type {ActionFileProvider, ActionResolver, ResolverContext} from "./resolver.js";
@@ -43,6 +44,13 @@ export async function runDiagnostics(
   const ctx: ResolverContext = {signal: opts.signal};
   for (const wf of workflows) {
     out.push(...(await runOne(ctx, lockfile, wf, opts)));
+  }
+  // Single-pass enrichment so per-validator files stay focused on detection
+  // and don't have to know about presentation concerns (doc URLs).
+  for (const f of out) {
+    if (!f.docUrl) {
+      f.docUrl = DOC_URLS[f.code];
+    }
   }
   return out;
 }
