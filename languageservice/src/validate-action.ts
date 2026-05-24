@@ -27,6 +27,7 @@ import {validateStepUsesFormat} from "./utils/validate-uses.js";
 import {getOrConvertActionTemplate, getOrParseAction} from "./utils/workflow-cache.js";
 import {validateActionReference} from "./validate-action-reference.js";
 import {validateFormatCalls} from "./validate-format-string.js";
+import {validateImmutableReleases} from "./validate-immutable-releases.js";
 import {ValidationConfig} from "./validate.js";
 
 /**
@@ -140,6 +141,13 @@ export async function validateAction(textDocument: TextDocument, config?: Valida
 
       // Single traversal for all expression validation (like workflow's additionalValidations)
       validateAllTokens(diagnostics, result.value);
+    }
+
+    // Repo-level: warn when this action's repo publishes non-immutable
+    // releases. Best-effort and host-driven — the language service has
+    // no opinion when the host can't supply release info.
+    if (result.value) {
+      await validateImmutableReleases(diagnostics, textDocument, result.value, config?.releasesProvider);
     }
   } catch (e) {
     error(`Unhandled error while validating action file: ${(e as Error).message}`);

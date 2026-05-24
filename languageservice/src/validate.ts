@@ -43,6 +43,7 @@ import {
 } from "./validate-dependency-lockfile.js";
 import {PinIntegrityConfig, validateWorkflowPinIntegrity} from "./validate-pin-integrity.js";
 import {validateFormatCalls} from "./validate-format-string.js";
+import {ReleasesProvider} from "./releases-provider.js";
 import {ValueProviderConfig, ValueProviderKind} from "./value-providers/config.js";
 import {defaultValueProviders} from "./value-providers/default.js";
 
@@ -55,6 +56,7 @@ export type ValidationConfig = {
   actionsMetadataProvider?: ActionsMetadataProvider;
   fileProvider?: FileProvider;
   dependencyLockfileProvider?: DependencyLockfileProvider;
+  releasesProvider?: ReleasesProvider;
   pinIntegrity?: PinIntegrityConfig;
   featureFlags?: FeatureFlags;
 };

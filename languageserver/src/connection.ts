@@ -45,6 +45,7 @@ import {timeOperation} from "./utils/timer.js";
 import {valueProviders} from "./value-providers.js";
 import * as vscodeURI from "vscode-uri";
 import {OctokitActionResolver} from "./action-resolver.js";
+import {OctokitReleasesProvider} from "./releases-provider.js";
 
 export function initConnection(connection: Connection) {
   const documents: TextDocuments<TextDocument> = new TextDocuments(TextDocument);
@@ -169,6 +170,7 @@ export function initConnection(connection: Connection) {
         // eslint-disable-next-line @typescript-eslint/require-await
         getWorkflowUses: async lockfileUri => getWorkflowUsesForLockfile(lockfileUri, documents)
       },
+      releasesProvider: client ? new OctokitReleasesProvider(client, repos, cache) : undefined,
       pinIntegrity: actionResolver ? {actionResolver} : undefined,
       featureFlags
     };
