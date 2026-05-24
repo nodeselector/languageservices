@@ -1,0 +1,119 @@
+{
+  "title": "Workflow File Loading and Lockfile Shim",
+  "description": "A guided tour of how workflow documents and referenced workflow files move through the language server, parser, converter, cache, and tests, with notes on where a secondary lockfile companion could be introduced.",
+  "steps": [
+    {
+      "title": "Start Here",
+      "description": "### Start Here\n\nThis tour is for an engineer who wants to understand file loading in actions/languageservices well enough to prototype a companion workflow lockfile. By the end, you should be able to trace the active workflow document from VS Code into validation and completion, explain how referenced reusable workflow files are fetched, and identify the safest seams for adding a second file without confusing cache behavior.\n\nThe high-level map is: language server document events create a ValidationConfig, FileProvider loads referenced workflow files, workflow-parser converts the parsed YAML into a WorkflowTemplate, languageservice uses that model for diagnostics, completions, hover, and links."
+    },
+    {
+      "title": "Repository Shape",
+      "directory": "languageservice/src",
+      "description": "### Repository Shape\n\nThe repo is split so the language server owns editor and workspace concerns, languageservice owns editor features, and workflow-parser owns YAML/schema/template conversion. A lockfile shim should respect that split: VS Code file access belongs near languageserver, domain interpretation belongs in languageservice or workflow-parser, and tests should exist at the lowest layer that can prove the behavior.\n\nValidation: keep this boundary in mind as you move through the next steps. If a proposed lockfile change makes workflow-parser know about VS Code requests directly, it is probably crossing a layer boundary."
+    },
+    {
+      "title": "Document Lifecycle Entry",
+      "file": "languageserver/src/connection.ts",
+      "pattern": "export function initConnection",
+      "description": "### Document Lifecycle Entry\n\nThe language server creates a TextDocuments manager and wires VS Code/LSP events in initConnection. The active workflow file is not loaded through FileProvider; it arrives as an already-open TextDocument from the editor.\n\nFor a companion lockfile, this means there are two different loading modes to consider: the primary workflow document comes from the LSP text document cache, while secondary files must be read through explicit workspace requests or another provider. That asymmetry matters for freshness and cache invalidation."
+    },
+    {
+      "title": "Validation Trigger",
+      "file": "languageserver/src/connection.ts",
+      "pattern": "documents.onDidChangeContent",
+      "description": "### Validation Trigger\n\nEvery open/change event clears the cache entry for the changed document URI, then validates that TextDocument. This is the natural place to notice that only the workflow file URI is invalidated today.\n\nLockfile shim thought: if a lockfile can change independently, the server needs a way to clear the workflow template cache when the companion file changes too. Otherwise diagnostics or completions could use a stale lockfile-derived view even after the user edits the lockfile."
+    },
+    {
+      "title": "Config Assembly",
+      "file": "languageserver/src/connection.ts",
+      "pattern": "const config: ValidationConfig",
+      "description": "### Config Assembly\n\nvalidateTextDocument builds the ValidationConfig passed into languageservice. This is where editor-aware providers get assembled: value providers, context providers, action metadata, FileProvider, and feature flags.\n\nThis is the first practical shim point for lockfile support. You could add a lockfile provider alongside fileProvider, or wrap fileProvider with lockfile-aware behavior, while keeping raw LSP file reads inside languageserver.\n\nValidation: a good design here should also update completion and hover paths, not just validation, because those features build similar configs elsewhere in this file and in on-completion.ts."
+    },
+    {
+      "title": "LSP Read Request",
+      "file": "languageserver/src/request.ts",
+      "pattern": "ReadFile",
+      "description": "### LSP Read Request\n\nThe server-side FileProvider reads local workspace files by sending the custom actions/readFile request back to the client. That keeps Node/browser server code portable and delegates actual file system access to the VS Code extension host.\n\nLockfile shim thought: a companion file could reuse this request if its path is deterministic, for example derived from the workflow URI. If the lockfile lives outside the workflow directory or has multiple candidate names, this request shape may need to carry more intent than a single path string."
+    },
+    {
+      "title": "FileProvider Boundary",
+      "file": "languageserver/src/file-provider.ts",
+      "pattern": "export function getFileProvider",
+      "description": "### FileProvider Boundary\n\ngetFileProvider adapts repository context into workflow-parser's FileProvider interface. It handles two worlds: remote reusable workflows through Octokit and local reusable workflows through workspace URI joining plus actions/readFile.\n\nThis is the cleanest existing abstraction for loading extra files by reference. For lockfiles, decide whether the companion file is tied to the current workflow document, tied to every referenced workflow, or both. If it is tied to referenced workflows, extending this provider shape may be better than bolting reads into validation logic."
+    },
+    {
+      "title": "Reference Grammar",
+      "file": "workflow-parser/src/workflows/file-reference.ts",
+      "pattern": "export function parseFileReference",
+      "description": "### Reference Grammar\n\nparseFileReference turns a workflow uses value into either a local path or a remote owner/repo/path@version reference. FileProvider consumers operate on this normalized FileReference rather than raw strings.\n\nLockfile shim thought: if the lockfile records resolved commits for uses references, this is one of the places where raw references become structured enough to compare against lockfile entries. Be careful not to make parseFileReference read the lockfile itself; it should stay a parser for reference syntax."
+    },
+    {
+      "title": "Primary Workflow Parse",
+      "file": "workflow-parser/src/workflows/workflow-parser.ts",
+      "pattern": "export function parseWorkflow",
+      "description": "### Primary Workflow Parse\n\nparseWorkflow takes a File object and a TemplateContext or trace writer, parses YAML, and reads it against the workflow schema. It knows about the entry file name and content, but not about LSP documents or workspace reads.\n\nFor lockfile support, this is a useful boundary marker: parsing the workflow should probably remain about the workflow file. If the lockfile influences semantics, inject that later through converter options or a provider-backed context rather than mixing companion-file IO into YAML parsing."
+    },
+    {
+      "title": "Conversion and Fetch Depth",
+      "file": "workflow-parser/src/model/convert.ts",
+      "pattern": "export async function convertWorkflowTemplate",
+      "description": "### Conversion and Fetch Depth\n\nconvertWorkflowTemplate turns parsed template tokens into the WorkflowTemplate model. Its options already control reusable workflow depth and feature flags, and it accepts an optional FileProvider.\n\nThis is a strong candidate for the semantic lockfile hook. A companion lockfile could enter as a new converter option or provider that lets conversion annotate, validate, or resolve dependencies without making higher layers understand every lockfile detail.\n\nValidation: any new option that changes conversion output must be included in workflow-cache.ts cache keys, just like feature flags and reusable workflow depth are today."
+    },
+    {
+      "title": "Reusable Workflow Fetch",
+      "file": "workflow-parser/src/model/convert.ts",
+      "pattern": "const file = await fileProvider.getFileContent",
+      "description": "### Reusable Workflow Fetch\n\nThis is where conversion dereferences reusable workflow jobs. It parses the job's uses value, asks FileProvider for the called workflow, parses that file into the same TemplateContext, then merges referenced workflow metadata back into the calling job.\n\nLockfile shim thought: this is the precise moment where a lockfile could enforce that the reference resolved to an expected immutable target, or choose an alternate file source. Keep the error location behavior in mind: errors from the referenced workflow are intentionally reported at the original job ref because the editor is focused on the caller."
+    },
+    {
+      "title": "Referenced Workflow Metadata",
+      "file": "workflow-parser/src/model/converter/referencedWorkflow.ts",
+      "pattern": "export function convertReferencedWorkflow",
+      "description": "### Referenced Workflow Metadata\n\nconvertReferencedWorkflow extracts workflow_call inputs, secrets, outputs, and nested jobs from the fetched reusable workflow and stores them on the caller's ReusableWorkflowJob model. Downstream editor features depend on these definitions.\n\nFor lockfile support, this shows what extra data becomes valuable after a secondary file is loaded: not just diagnostics, but enriched model fields that completions and hover can use. If the lockfile describes dependency pins, consider whether the model needs a dependency/lock metadata field rather than only emitting diagnostics."
+    },
+    {
+      "title": "Cache Footgun",
+      "file": "languageservice/src/utils/workflow-cache.ts",
+      "pattern": "function workflowTemplateCacheKey",
+      "description": "### Cache Footgun\n\nThe language service caches parse and conversion results by URI plus conversion inputs such as fetch depth, max depth, error policy, and enabled feature flags. This is exactly where companion file support can go stale if the lockfile affects conversion output but is not part of the cache identity.\n\nLockfile shim requirement: include a stable lockfile cache dimension, such as lockfile URI plus version/hash or an options fingerprint, and make sure lockfile edits clear any workflow entries that depend on it. This is the spot to inspect before trusting any prototype result."
+    },
+    {
+      "title": "Validation Consumer",
+      "file": "languageservice/src/validate.ts",
+      "pattern": "async function validateWorkflow",
+      "description": "### Validation Consumer\n\nvalidateWorkflow wraps the open TextDocument as a File, gets or parses the workflow, converts it with fetchReusableWorkflowDepth set to 1 when a FileProvider exists, then runs additional validations over the converted model.\n\nIf the lockfile is primarily a correctness check, validation is where diagnostics should surface. But avoid loading the lockfile only here if completion and hover also need the same resolved dependency facts; otherwise features will disagree about the same workflow."
+    },
+    {
+      "title": "Completion Consumer",
+      "file": "languageservice/src/complete.ts",
+      "pattern": "export async function complete",
+      "description": "### Completion Consumer\n\nCompletion uses the transformed document, parses and converts it, then builds a WorkflowContext from the converted model. Reusable workflow input and secret completions depend on the referenced workflow having already been fetched and merged.\n\nLockfile shim thought: if the lockfile changes what dependencies or referenced workflow metadata are visible, completion needs the same config/provider path as validation. A validation-only shim might produce correct diagnostics but stale or missing editor assistance."
+    },
+    {
+      "title": "Reusable Values",
+      "file": "languageservice/src/value-providers/default.ts",
+      "pattern": "workflow-job-with",
+      "description": "### Reusable Values\n\nThe default value providers map schema definition keys to context-aware suggestions. For reusable workflow calls, workflow-job-with and workflow-job-secrets read from the ReusableWorkflowJob metadata populated during referenced workflow conversion.\n\nThis is a downstream proof point: once the secondary file influences the WorkflowTemplate, editor features can stay small and model-driven. Prefer that shape over making each feature independently read and interpret the lockfile."
+    },
+    {
+      "title": "Tests as the Prototype Harness",
+      "file": "languageservice/src/test-utils/test-file-provider.ts",
+      "pattern": "export const testFileProvider",
+      "description": "### Tests as the Prototype Harness\n\nThe test FileProvider returns in-memory reusable workflow files keyed by fileIdentifier. This is the easiest place to prototype lockfile-related behavior without involving VS Code file IO or GitHub API calls.\n\nValidation: add a parallel test provider or extend this one with companion lockfile content, then prove validation, completion, and hover all see the same model. If the lockfile is tied to remote refs, include both local and remote cases."
+    },
+    {
+      "title": "Regression Tests",
+      "file": "languageservice/src/validate.workflow-references.test.ts",
+      "pattern": "describe\\(\"workflow references validation\"",
+      "description": "### Regression Tests\n\nThese tests prove the current reusable workflow reference behavior: invalid reference format, missing referenced workflow, valid remote reference, valid local reference, and required inputs. They are the right neighborhood for lockfile diagnostics that attach to a workflow job's uses value.\n\nFor a lockfile shim, add cases that answer: missing lockfile, stale lockfile entry, lockfile entry matches resolved reference, and local reusable workflow behavior. Then mirror happy-path editor behavior in complete.reusable-workflows.test.ts if completions depend on lockfile data."
+    },
+    {
+      "title": "Likely Shim Plan",
+      "description": "### Likely Shim Plan\n\nA conservative implementation path would be:\n\n- Define a small lockfile provider/config type at the languageservice boundary, separate from raw VS Code file reads.\n- Have languageserver derive the companion lockfile URI for the current workflow and read it via actions/readFile, or expose a provider that can do that lazily.\n- Thread the provider or parsed lockfile through ValidationConfig and CompletionConfig into convertWorkflowTemplate options.\n- Interpret lockfile data in workflow-parser conversion, near reusable workflow reference resolution or dependency conversion, so downstream features consume one WorkflowTemplate.\n- Update workflowTemplateCacheKey and cache clearing so companion file contents are part of freshness.\n- Prove the behavior with test FileProvider-style fixtures before wiring VS Code request behavior."
+    },
+    {
+      "title": "Exit Criteria",
+      "description": "### Exit Criteria\n\nYou are done with this tour when you can:\n\n- Explain how the active workflow TextDocument becomes parser input without going through FileProvider.\n- Explain how referenced reusable workflows are fetched through FileProvider during conversion.\n- Name the cache invalidation risk introduced by a companion lockfile.\n- Point to the conversion step where lockfile semantics should probably be applied.\n- Point to the validation and completion tests that should prove the shim works.\n- Sketch a safe first change that threads a lockfile provider through config without making workflow-parser depend on VS Code APIs."
+    }
+  ]
+}

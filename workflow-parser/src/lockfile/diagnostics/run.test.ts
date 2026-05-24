@@ -152,4 +152,11 @@ describe("lockfile diagnostics engine", () => {
     expect(got[0]!.workflowPath).toBe(a);
     expect(got[1]!.workflowPath).toBe(b);
   });
+
+  it("attaches a docUrl to every finding via the central enrichment pass", async () => {
+    const wf: WorkflowInput = {path: ci, uses: [{owner: "actions", repo: "checkout", path: "", ref: "v4"}]};
+    const got = await runDiagnostics(lockfile({}), [wf]);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.docUrl).toMatch(/^https:\/\/docs\.github\.com\//);
+  });
 });

@@ -1,0 +1,7 @@
+name: Language Services
+description: Language services action
+runs:
+  using: composite
+  steps:
+    - run: foo
+      shell: bash

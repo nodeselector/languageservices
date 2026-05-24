@@ -70,4 +70,10 @@ export type Finding = {
   position?: Position;
   message: string;
   remediation?: string;
+  /**
+   * Documentation URL explaining the finding and how to act on it.
+   * Populated centrally by the engine from a code → URL table so
+   * structural / resolver checks don't need to know about hosting.
+   */
+  docUrl?: string;
 };

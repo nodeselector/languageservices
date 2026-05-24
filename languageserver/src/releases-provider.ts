@@ -26,6 +26,7 @@ export class OctokitReleasesProvider implements ReleasesProvider {
   async getReleasesForAction(actionUri: string): Promise<ReleaseInfo[] | undefined> {
     const repo = this.repoFor(actionUri);
     if (!repo) return undefined;
+    if (!(await this.hasAdmin(repo))) return undefined;
     const key = `releases:${repo.owner}/${repo.name}`;
     return await this.cache.get(key, undefined, async () => {
       try {
@@ -42,6 +43,27 @@ export class OctokitReleasesProvider implements ReleasesProvider {
         return undefined;
       }
     });
+  }
+
+  // hasAdmin probes the repo metadata to confirm the caller has admin
+  // access. Without admin the maintainer can neither enable the repo-level
+  // immutability setting nor republish releases, so the diagnostic would
+  // just be noise. Cached per repo.
+  private async hasAdmin(repo: RepositoryContext): Promise<boolean> {
+    const key = `perms:${repo.owner}/${repo.name}`;
+    const v = await this.cache.get(key, undefined, async () => {
+      try {
+        const res = await this.client.request("GET /repos/{owner}/{repo}", {
+          owner: repo.owner,
+          repo: repo.name
+        });
+        const perms = (res.data as {permissions?: {admin?: boolean}}).permissions;
+        return perms?.admin === true;
+      } catch {
+        return false;
+      }
+    });
+    return v === true;
   }
 
   private repoFor(uri: string): RepositoryContext | undefined {
