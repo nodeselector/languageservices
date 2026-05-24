@@ -1,10 +1,12 @@
 import {FeatureFlags} from "@actions/expressions";
 import {lockfileDiagnostics} from "@actions/workflow-parser";
+import {releasesUrl} from "@actions/workflow-parser/lockfile/diagnostics/doc-urls";
 import {parseDependencyLockfile} from "@actions/workflow-parser/model/dependency-lockfile";
 import {isActionStep, isJob, isReusableWorkflowJob} from "@actions/workflow-parser/model/type-guards";
 import {WorkflowJob, WorkflowTemplate} from "@actions/workflow-parser/model/workflow-template";
 import {StringToken} from "@actions/workflow-parser/templates/tokens/string-token";
 import {Diagnostic, DiagnosticSeverity, URI} from "vscode-languageserver-types";
+import type {LockfileDiagnosticData} from "./lockfile-diagnostic-data.js";
 import {mapRange} from "./utils/range.js";
 import {DependencyLockfileProvider} from "./validate-dependency-lockfile.js";
 
@@ -80,27 +82,41 @@ export async function validateWorkflowPinIntegrity(
     signal
   });
 
-  const tokenByKey = new Map<string, StringToken>();
-  for (const r of refs) {
-    tokenByKey.set(usesKey(r.owner, r.repo, r.path, r.ref), r.token);
-  }
-
+  const findingByKey = new Map<string, (typeof findings)[number]>();
   for (const f of findings) {
     // NOT_PINNED is already emitted (with editor-tuned message) by
     // validateWorkflowUsesAgainstLockfile — skip the engine's twin to avoid
     // duplicates.
     if (f.code === lockfileDiagnostics.DiagnosticCodes.NotPinned) continue;
+    findingByKey.set(usesKey(f.owner, f.repo, f.path, f.ref), f);
+  }
 
-    const token = tokenByKey.get(usesKey(f.owner, f.repo, f.path, f.ref));
-    if (!token) continue;
+  for (const r of refs) {
+    const f = findingByKey.get(usesKey(r.owner, r.repo, r.path, r.ref));
+    if (!f) continue;
 
     const message = f.remediation ? `${f.message} — ${f.remediation}` : f.message;
+    const data: LockfileDiagnosticData = {
+      kind: "lockfile",
+      code: f.code,
+      owner: f.owner,
+      repo: f.repo,
+      path: f.path,
+      ref: f.ref,
+      workflowPath: f.workflowPath,
+      lockedSha: f.lockedSha,
+      liveSha: f.liveSha,
+      docUrl: f.docUrl,
+      releaseUrl: releasesUrl(f.owner, f.repo, f.ref)
+    };
     diagnostics.push({
       message,
-      range: mapRange(token.range),
+      range: mapRange(r.token.range),
       severity: mapSeverity(f.severity),
       code: f.code,
-      source: "github-actions"
+      codeDescription: f.docUrl ? {href: f.docUrl} : undefined,
+      source: "github-actions",
+      data
     });
   }
 }
