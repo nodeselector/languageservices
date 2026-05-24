@@ -27,6 +27,19 @@ export type LockfileAction = {
 
 export type DependencyLockfileWorkflow = {
   dependencies: string[];
+  /**
+   * Source range of the workflow's path key in the lockfile YAML.
+   * Populated by {@link parseDependencyLockfile} so cross-doc
+   * coherence validators can attach diagnostics to the workflow entry.
+   */
+  keyRange?: TokenRange;
+  /**
+   * Source range of each dependency entry, parallel to
+   * {@link DependencyLockfileWorkflow.dependencies}. Populated by
+   * {@link parseDependencyLockfile} so coherence validators can attach
+   * per-dep diagnostics (e.g. orphan deps).
+   */
+  dependencyRanges?: (TokenRange | undefined)[];
 };
 
 export type DependencyLockfile = {
@@ -287,6 +300,8 @@ function readWorkflows(
     }
 
     result.workflows[workflowPath] = readWorkflow(name, workflowPath, item.value, lineCounter, errors, result.actions);
+    const wf = result.workflows[workflowPath];
+    wf.keyRange = getRange(item.key, lineCounter);
   }
 }
 
@@ -311,6 +326,7 @@ function readWorkflow(
   }
 
   const dependencies: string[] = [];
+  const dependencyRanges: (TokenRange | undefined)[] = [];
   const seen = new Map<string, DependencyPin>();
   for (const item of dependenciesPair.value.items) {
     if (!isScalar(item) || typeof item.value !== "string") {
@@ -368,9 +384,10 @@ function readWorkflow(
 
     seen.set(key, pin);
     dependencies.push(actionKey);
+    dependencyRanges.push(getRange(item, lineCounter));
   }
 
-  return {dependencies};
+  return {dependencies, dependencyRanges};
 }
 
 function findPair(map: YAMLMap.Parsed, key: string): Pair<ParsedNode, ParsedNode | null> | undefined {

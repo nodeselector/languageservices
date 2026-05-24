@@ -75,7 +75,7 @@ export async function validate(textDocument: TextDocument, config?: ValidationCo
   }
 
   if (isDependencyLockfileDocument(textDocument.uri)) {
-    return validateDependencyLockfile(textDocument, config?.featureFlags);
+    return validateDependencyLockfile(textDocument, config?.dependencyLockfileProvider, config?.featureFlags);
   }
 
   return validateWorkflow(textDocument, config);

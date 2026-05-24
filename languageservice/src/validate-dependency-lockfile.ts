@@ -18,9 +18,21 @@ import {mapRange} from "./utils/range.js";
 
 export type DependencyLockfileProvider = {
   getDependencyLockfile(workflowUri: URI): Promise<File | undefined>;
+  /**
+   * For lockfile-side coherence checks: list the `uses:` refs (e.g.
+   * "actions/checkout@v4") for each workflow path the given lockfile
+   * governs. Returning undefined disables those cross-doc checks; an
+   * empty map means "no workflows found". Optional — hosts that don't
+   * implement this just lose the orphan-dep diagnostics.
+   */
+  getWorkflowUses?(lockfileUri: URI): Promise<Map<string, string[]> | undefined>;
 };
 
-export function validateDependencyLockfile(textDocument: TextDocument, featureFlags?: FeatureFlags): Diagnostic[] {
+export async function validateDependencyLockfile(
+  textDocument: TextDocument,
+  dependencyLockfileProvider?: DependencyLockfileProvider,
+  featureFlags?: FeatureFlags
+): Promise<Diagnostic[]> {
   if (!featureFlags?.isEnabled("allowDependencies")) {
     return [];
   }
@@ -31,39 +43,143 @@ export function validateDependencyLockfile(textDocument: TextDocument, featureFl
     range: mapRange(err.range)
   }));
 
-  // Coherence pass: an action entry whose inner `ref:` field disagrees
-  // with its key's ref is effectively orphaned — workflow uses keyed on
-  // the key ref won't actually be pinned. Surface as an error on the
-  // action entry so the lockfile is the place to fix it.
-  if (result.value) {
-    const referencedKeys = new Set<string>();
-    for (const wf of Object.values(result.value.workflows)) {
-      for (const dep of wf.dependencies) referencedKeys.add(dep);
+  if (!result.value) return diagnostics;
+
+  // Intra-lockfile coherence: drift between inner ref and key ref, and
+  // actions-map entries no workflow declares as a dependency.
+  const referencedKeys = new Set<string>();
+  for (const wf of Object.values(result.value.workflows)) {
+    for (const dep of wf.dependencies) referencedKeys.add(dep);
+  }
+  for (const [actionKey, action] of Object.entries(result.value.actions)) {
+    const keyPin = parsePin(actionKey);
+    if (keyPin && action.ref && keyPin.ref !== action.ref) {
+      diagnostics.push({
+        message: `lockfile action ${JSON.stringify(actionKey)} has ref ${JSON.stringify(
+          action.ref
+        )} but its key pins ref ${JSON.stringify(
+          keyPin.ref
+        )} — re-run \`gh actions-pin\` to reconcile, or remove the entry`,
+        range: mapRange(action.keyRange)
+      });
     }
-    for (const [actionKey, action] of Object.entries(result.value.actions)) {
-      const keyPin = parsePin(actionKey);
-      if (keyPin && action.ref && keyPin.ref !== action.ref) {
-        diagnostics.push({
-          message: `lockfile action ${JSON.stringify(actionKey)} has ref ${JSON.stringify(
-            action.ref
-          )} but its key pins ref ${JSON.stringify(
-            keyPin.ref
-          )} — re-run \`gh actions-pin\` to reconcile, or remove the entry`,
-          range: mapRange(action.keyRange)
-        });
+    if (!referencedKeys.has(actionKey)) {
+      diagnostics.push({
+        message: `lockfile action ${JSON.stringify(
+          actionKey
+        )} is orphaned — no workflow's dependencies reference it; remove the entry or re-run \`gh actions-pin\``,
+        range: mapRange(action.keyRange)
+      });
+    }
+  }
+
+  // Cross-doc coherence: the workflow source is the source of truth.
+  // For every dep the lockfile declares for a workflow, the workflow
+  // must actually `uses:` it — otherwise the dep is stale.
+  const usesByWorkflow = dependencyLockfileProvider?.getWorkflowUses
+    ? await dependencyLockfileProvider.getWorkflowUses(textDocument.uri)
+    : undefined;
+  if (usesByWorkflow) {
+    for (const [workflowPath, wf] of Object.entries(result.value.workflows)) {
+      const uses = usesByWorkflow.get(workflowPath);
+      if (!uses) continue;
+      const usedByKey = new Map<string, ParsedUses>();
+      for (const u of uses) {
+        const parsed = parseUsesRef(u);
+        if (parsed) usedByKey.set(parsed.key, parsed);
       }
-      if (!referencedKeys.has(actionKey)) {
-        diagnostics.push({
-          message: `lockfile action ${JSON.stringify(
-            actionKey
-          )} is orphaned — no workflow's dependencies reference it; remove the entry or re-run \`gh actions-pin\``,
-          range: mapRange(action.keyRange)
-        });
+      const declaredKeys = new Set<string>();
+      const ranges = wf.dependencyRanges ?? [];
+      for (let i = 0; i < wf.dependencies.length; i++) {
+        const dep = wf.dependencies[i];
+        const pin = parsePin(dep);
+        if (!pin) continue;
+        const key = dependencyIndexKey(pin);
+        declaredKeys.add(key);
+        if (usedByKey.has(key)) continue;
+        diagnostics.push(
+          staleLockfileDiagnostic(
+            `lockfile dependency ${JSON.stringify(
+              dep
+            )} is orphaned — workflow ${JSON.stringify(
+              workflowPath
+            )} has no \`uses:\` matching it; remove the entry or re-run \`gh actions-pin\``,
+            mapRange(ranges[i]),
+            {owner: pin.owner, repo: pin.repo, path: pin.path ?? "", ref: pin.ref},
+            workflowPath
+          )
+        );
+      }
+      for (const [key, used] of usedByKey) {
+        if (declaredKeys.has(key)) continue;
+        diagnostics.push(
+          staleLockfileDiagnostic(
+            `lockfile dependencies for ${JSON.stringify(
+              workflowPath
+            )} are stale — workflow \`uses:\` ${JSON.stringify(
+              key
+            )} but the lockfile doesn't track it; re-run \`gh actions-pin\``,
+            mapRange(wf.keyRange),
+            used,
+            workflowPath
+          )
+        );
       }
     }
   }
 
   return diagnostics;
+}
+
+type ParsedUses = {
+  owner: string;
+  repo: string;
+  path: string;
+  ref: string;
+  key: string;
+};
+
+/** Parse an unpinned `uses:` ref like "actions/checkout@v4". */
+function parseUsesRef(uses: string): ParsedUses | undefined {
+  if (uses.startsWith("./") || uses.startsWith(".\\") || uses.startsWith("docker://")) return undefined;
+  const at = uses.indexOf("@");
+  if (at <= 0 || at === uses.length - 1) return undefined;
+  const source = uses.substring(0, at);
+  const ref = uses.substring(at + 1);
+  const parts = source.split(/[\\/]/);
+  if (parts.length < 2 || !parts[0] || !parts[1]) return undefined;
+  const owner = parts[0].toLowerCase();
+  const repo = parts[1].toLowerCase();
+  const path = parts.length > 2 ? parts.slice(2).join("/") : "";
+  const keyPath = path ? "/" + path : "";
+  return {owner, repo, path, ref, key: `${owner}/${repo}${keyPath}@${ref}`};
+}
+
+function staleLockfileDiagnostic(
+  message: string,
+  range: Diagnostic["range"],
+  target: {owner: string; repo: string; path: string; ref: string},
+  workflowPath: string
+): Diagnostic {
+  const data: LockfileDiagnosticData = {
+    kind: "lockfile",
+    code: "stale",
+    owner: target.owner,
+    repo: target.repo,
+    path: target.path,
+    ref: target.ref,
+    workflowPath,
+    docUrl: DOC_URLS.stale,
+    releaseUrl: releasesUrl(target.owner, target.repo, target.ref)
+  };
+  return {
+    message,
+    range,
+    code: "stale",
+    codeDescription: {href: DOC_URLS.stale},
+    source: "github-actions",
+    data
+  };
 }
 
 export async function validateWorkflowUsesAgainstLockfile(

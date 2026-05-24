@@ -143,6 +143,13 @@ export function initConnection(connection: Connection) {
             .filter(doc => isWorkflowUri(doc.uri))
             .map(doc => validateTextDocument(doc))
         );
+      } else if (isWorkflowUri(change.document.uri)) {
+        await Promise.all(
+          documents
+            .all()
+            .filter(doc => isDependencyLockfileUri(doc.uri))
+            .map(doc => validateTextDocument(doc))
+        );
       }
     });
   });
@@ -158,7 +165,9 @@ export function initConnection(connection: Connection) {
         return await connection.sendRequest(Requests.ReadFile, {path} satisfies ReadFileRequest);
       }),
       dependencyLockfileProvider: {
-        getDependencyLockfile: async workflowUri => await getDependencyLockfile(workflowUri, repoContext)
+        getDependencyLockfile: async workflowUri => await getDependencyLockfile(workflowUri, repoContext),
+        // eslint-disable-next-line @typescript-eslint/require-await
+        getWorkflowUses: async lockfileUri => getWorkflowUsesForLockfile(lockfileUri, documents)
       },
       pinIntegrity: actionResolver ? {actionResolver} : undefined,
       featureFlags
@@ -292,4 +301,32 @@ function inferWorkspaceUri(workflowUri: string): string | undefined {
   }
 
   return workflowUri.substring(0, workflowsIndex);
+}
+
+function getWorkflowUsesForLockfile(
+  lockfileUri: string,
+  documents: TextDocuments<TextDocument>
+): Map<string, string[]> | undefined {
+  const workspaceUri = inferWorkspaceUri(lockfileUri);
+  if (!workspaceUri) return undefined;
+  const prefix = workspaceUri + "/";
+  const result = new Map<string, string[]>();
+  for (const doc of documents.all()) {
+    if (!isWorkflowUri(doc.uri)) continue;
+    if (!doc.uri.startsWith(prefix)) continue;
+    const relPath = decodeURIComponent(doc.uri.substring(prefix.length));
+    result.set(relPath, extractUsesRefs(doc.getText()));
+  }
+  return result;
+}
+
+function extractUsesRefs(content: string): string[] {
+  const refs: string[] = [];
+  const re = /^\s*(?:-\s+)?uses\s*:\s*(?:"([^"\n]+)"|'([^'\n]+)'|([^\s#"'\n]+))/gm;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(content)) !== null) {
+    const value = match[1] ?? match[2] ?? match[3];
+    if (value) refs.push(value);
+  }
+  return refs;
 }

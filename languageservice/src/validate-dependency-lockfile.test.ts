@@ -131,6 +131,43 @@ workflows:
 
     expect(result).toEqual([]);
   });
+
+  it("reports lockfile dependencies orphaned by the workflow source (cross-doc)", async () => {
+    const lockfile = `version: v0.0.1
+actions:
+  actions/checkout@v3:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
+    ref: v3
+    sha: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    owner_id: 1
+    repo_id: 2
+workflows:
+  .github/workflows/ci.yml:
+    dependencies:
+      - actions/checkout@v3:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+`;
+    const config: ValidationConfig = {
+      featureFlags: new FeatureFlags({allowDependencies: true}),
+      dependencyLockfileProvider: {
+        // eslint-disable-next-line @typescript-eslint/require-await
+        getDependencyLockfile: async () => undefined,
+        // eslint-disable-next-line @typescript-eslint/require-await
+        getWorkflowUses: async () =>
+          new Map([[".github/workflows/ci.yml", ["actions/checkout@v4"]]])
+      }
+    };
+    const result = await validate(
+      createDocument(".github/workflows/actions.lock", lockfile),
+      config
+    );
+
+    const messages = result.map(d => d.message);
+    expect(messages).toContain(
+      'lockfile dependency "actions/checkout@v3:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" is orphaned — workflow ".github/workflows/ci.yml" has no `uses:` matching it; remove the entry or re-run `gh actions-pin`'
+    );
+    expect(messages).toContain(
+      'lockfile dependencies for ".github/workflows/ci.yml" are stale — workflow `uses:` "actions/checkout@v4" but the lockfile doesn\'t track it; re-run `gh actions-pin`'
+    );
+  });
 });
 
 function workflowDocument() {
