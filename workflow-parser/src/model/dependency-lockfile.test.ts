@@ -41,12 +41,10 @@ describe("parseDependencyLockfile", () => {
   const validLockfile = `version: v0.0.1
 actions:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: v4
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 2
   actions/setup-go@v5:sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5:
-    ref: v5
     commit: sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5
     owner_id: 1
     repo_id: 3
@@ -65,14 +63,12 @@ workflows:
       version: "v0.0.1",
       actions: {
         "actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683": {
-          ref: "v4",
           commit: "sha1-11bd71901bbe5b1630ceea73d27597364c9af683",
           ownerId: 1,
           repoId: 2,
           keyRange: expect.any(Object)
         },
         "actions/setup-go@v5:sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5": {
-          ref: "v5",
           commit: "sha1-d35c59abb061a4a6fb18e82ac0862c26744d6ab5",
           ownerId: 1,
           repoId: 3,
@@ -155,12 +151,10 @@ workflows:
       `version: v0.0.1
 actions:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
-    ref: v4
     commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 2
   actions/checkout@v4:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
-    ref: v4
     commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 1
     repo_id: 2
