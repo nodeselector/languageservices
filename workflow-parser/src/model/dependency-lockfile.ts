@@ -13,7 +13,21 @@ export type DependencyPin = {
 };
 
 export type LockfileAction = {
+  /**
+   * The @<ref> portion encoded in the pin key. Per writer convention
+   * (gh-actions-pin) this mirrors `tag` when a tag was discovered at the
+   * commit, falling back to `branch` otherwise.
+   */
   ref?: string;
+  /** Discovered release/tag at the commit, if one exists. Optional. */
+  tag?: string;
+  /**
+   * Discovered branch containing the commit. Writers MUST refuse to record
+   * an Action without a branch — a commit not on any branch is an
+   * impostor / fork-network signal. Absence in older lockfiles is
+   * tolerated for read compatibility.
+   */
+  branch?: string;
   commit?: string;
   ownerId: number;
   repoId: number;
@@ -254,6 +268,12 @@ function readActions(
       switch (key) {
         case "ref":
           action.ref = readString(name, pair.value, key, lineCounter, errors);
+          break;
+        case "tag":
+          action.tag = readString(name, pair.value, key, lineCounter, errors);
+          break;
+        case "branch":
+          action.branch = readString(name, pair.value, key, lineCounter, errors);
           break;
         case "commit":
           action.commit = readString(name, pair.value, key, lineCounter, errors);
