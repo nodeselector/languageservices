@@ -15,7 +15,7 @@ describe("validate dependency lockfile", () => {
 actions:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
     ref: v4
-    sha: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 2
 workflows:
@@ -93,7 +93,7 @@ workflows:
 actions:
   actions/checkout@v3:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
     ref: v3
-    sha: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 1
     repo_id: 2
 workflows:
@@ -137,7 +137,7 @@ workflows:
 actions:
   actions/checkout@v3:sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:
     ref: v3
-    sha: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    commit: sha1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     owner_id: 1
     repo_id: 2
 workflows:
@@ -179,12 +179,12 @@ workflows:
 actions:
   org/composite@v1:sha1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:
     ref: v1
-    sha: sha1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    commit: sha1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     owner_id: 1
     repo_id: 2
   actions/checkout@v6:sha1-cccccccccccccccccccccccccccccccccccccccc:
     ref: v6
-    sha: sha1-cccccccccccccccccccccccccccccccccccccccc
+    commit: sha1-cccccccccccccccccccccccccccccccccccccccc
     owner_id: 3
     repo_id: 4
 workflows:
@@ -247,7 +247,7 @@ function lockfileContent() {
 actions:
   actions/checkout@v4:sha1-11bd71901bbe5b1630ceea73d27597364c9af683:
     ref: v4
-    sha: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
+    commit: sha1-11bd71901bbe5b1630ceea73d27597364c9af683
     owner_id: 1
     repo_id: 2
 workflows:

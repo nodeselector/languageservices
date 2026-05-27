@@ -14,7 +14,7 @@ export type DependencyPin = {
 
 export type LockfileAction = {
   ref?: string;
-  sha?: string;
+  commit?: string;
   ownerId: number;
   repoId: number;
   /**
@@ -255,8 +255,8 @@ function readActions(
         case "ref":
           action.ref = readString(name, pair.value, key, lineCounter, errors);
           break;
-        case "sha":
-          action.sha = readString(name, pair.value, key, lineCounter, errors);
+        case "commit":
+          action.commit = readString(name, pair.value, key, lineCounter, errors);
           break;
         case "owner_id": {
           const v = readNumber(name, pair.value, key, lineCounter, errors);
