@@ -260,9 +260,6 @@ function readActions(
       }
 
       switch (key) {
-        case "ref":
-          // Legacy field — ignored; the ref is encoded in the map key.
-          break;
         case "tag":
           action.tag = readString(name, pair.value, key, lineCounter, errors);
           break;
