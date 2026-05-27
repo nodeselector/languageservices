@@ -73,9 +73,18 @@ export async function validateDependencyLockfile(
     }
   }
 
-  // Cross-doc coherence: the workflow source is the source of truth.
-  // For every dep the lockfile declares for a workflow, the workflow
-  // must actually `uses:` it — otherwise the dep is stale.
+  // Cross-doc coherence: the workflow source is the source of truth for
+  // direct uses. For every `uses:` in the workflow, the lockfile must have
+  // a matching dependency entry — otherwise the lockfile is incomplete.
+  //
+  // We deliberately do NOT report the reverse direction (lockfile dep with
+  // no matching `uses:`) here: that fires false positives on composite-
+  // action transitive dependencies. The lockfile correctly records the
+  // transitive `actions/checkout@v6` pulled in by `org/composite@v1`, but
+  // the workflow only `uses:` the composite. Without walking each
+  // composite's `action.yml` (which the language service does not do) we
+  // cannot tell a transitive from a genuinely stale entry, so we say
+  // nothing rather than flag every transitive.
   const usesByWorkflow = dependencyLockfileProvider?.getWorkflowUses
     ? await dependencyLockfileProvider.getWorkflowUses(textDocument.uri)
     : undefined;
@@ -89,34 +98,16 @@ export async function validateDependencyLockfile(
         if (parsed) usedByKey.set(parsed.key, parsed);
       }
       const declaredKeys = new Set<string>();
-      const ranges = wf.dependencyRanges ?? [];
-      for (let i = 0; i < wf.dependencies.length; i++) {
-        const dep = wf.dependencies[i];
+      for (const dep of wf.dependencies) {
         const pin = parsePin(dep);
         if (!pin) continue;
-        const key = dependencyIndexKey(pin);
-        declaredKeys.add(key);
-        if (usedByKey.has(key)) continue;
-        diagnostics.push(
-          staleLockfileDiagnostic(
-            `lockfile dependency ${JSON.stringify(
-              dep
-            )} is orphaned — workflow ${JSON.stringify(
-              workflowPath
-            )} has no \`uses:\` matching it; remove the entry or re-run \`gh actions-pin\``,
-            mapRange(ranges[i]),
-            {owner: pin.owner, repo: pin.repo, path: pin.path ?? "", ref: pin.ref},
-            workflowPath
-          )
-        );
+        declaredKeys.add(dependencyIndexKey(pin));
       }
       for (const [key, used] of usedByKey) {
         if (declaredKeys.has(key)) continue;
         diagnostics.push(
           staleLockfileDiagnostic(
-            `lockfile dependencies for ${JSON.stringify(
-              workflowPath
-            )} are stale — workflow \`uses:\` ${JSON.stringify(
+            `lockfile dependencies for ${JSON.stringify(workflowPath)} are stale — workflow \`uses:\` ${JSON.stringify(
               key
             )} but the lockfile doesn't track it; re-run \`gh actions-pin\``,
             mapRange(wf.keyRange),
